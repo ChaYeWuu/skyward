@@ -39,32 +39,44 @@ pub fn add_key(mount: &Path, raw: &[u8], wrapped: bool) -> Result<[u8; NAME_BYTE
     Ok(name)
 }
 
+#[cfg(target_os = "android")]
+fn policy(folder: &std::fs::File, dir: &Path) -> Result<Option<[u8; 32]>> {
+    use std::os::fd::AsRawFd;
+    const GET_POLICY: u32 = 0xc009_6616;
+    const POLICY_BYTES: usize = 24;
+
+    let mut policy = [0u8; 8 + POLICY_BYTES];
+    policy[..8].copy_from_slice(&(POLICY_BYTES as u64).to_ne_bytes());
+    if unsafe { libc::ioctl(folder.as_raw_fd(), GET_POLICY as libc::Ioctl, policy.as_mut_ptr()) } != 0 {
+        let e = std::io::Error::last_os_error();
+        if e.raw_os_error() == Some(libc::ENODATA) {
+            return Ok(None);
+        }
+        return Err(e).with_context(|| format!("read how {} is encrypted", dir.display()));
+    }
+    Ok(Some(policy))
+}
+
+/// Whether a directory has an encryption policy, even if its key is loaded.
+#[cfg(target_os = "android")]
+pub fn encrypted(dir: &Path) -> Result<bool> {
+    let folder = std::fs::File::open(dir).with_context(|| format!("open {}", dir.display()))?;
+    Ok(policy(&folder, dir)?.is_some())
+}
+
 /// Whether the names and contents under `dir` read as they are: it is not
 /// encrypted, or the key it is encrypted with is in the kernel. A user's
 /// own files read only once that user's key is let in.
 #[cfg(target_os = "android")]
 pub fn unlocked(dir: &Path) -> Result<bool> {
     use std::os::fd::AsRawFd;
-    const GET_POLICY: u32 = 0xc009_6616;
     const GET_KEY_STATUS: u32 = 0xc080_661a;
-    /// How the first kind of policy names its key, and how the second does.
     const BY_DESCRIPTOR: u32 = 1;
     const BY_IDENTIFIER: u32 = 2;
-    /// The second kind of policy is the largest: its version, three bytes
-    /// of how it encrypts, four reserved, and the key's name.
-    const POLICY_BYTES: usize = 24;
     const PRESENT: u32 = 2;
 
     let folder = std::fs::File::open(dir).with_context(|| format!("open {}", dir.display()))?;
-    let mut policy = [0u8; 8 + POLICY_BYTES];
-    policy[..8].copy_from_slice(&(POLICY_BYTES as u64).to_ne_bytes());
-    if unsafe { libc::ioctl(folder.as_raw_fd(), GET_POLICY as libc::Ioctl, policy.as_mut_ptr()) } != 0 {
-        let e = std::io::Error::last_os_error();
-        if e.raw_os_error() == Some(libc::ENODATA) {
-            return Ok(true);
-        }
-        return Err(e).with_context(|| format!("read how {} is encrypted", dir.display()));
-    }
+    let Some(policy) = policy(&folder, dir)? else { return Ok(true) };
     let mut status = [0u8; 128];
     match policy[8] {
         0 => {

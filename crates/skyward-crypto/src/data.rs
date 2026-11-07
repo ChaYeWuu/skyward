@@ -1,8 +1,5 @@
-//! Opening the data partition. A phone encrypts the whole of it with a key
-//! its storage hardware holds, and encrypts each user's files again with a
-//! key only that user's credential leads to. This is the first of the two:
-//! what it opens holds every file, with the names and contents of the ones
-//! that are a user's own still encrypted.
+//! Opening plaintext or hardware-encrypted data. Files guarded by a user's
+//! credential retain their own encryption until that user's key is loaded.
 
 use crate::gatekeeper::Gatekeeper;
 use crate::keymint::KeyMint;
@@ -106,21 +103,13 @@ pub struct Opened {
 /// mount leaves no device behind.
 fn open(service: &KeyMint) -> Result<Opened> {
     let (entries, mapped) = map(service)?;
-    let mounted = (|| -> Result<(Option<Checked>, String)> {
-        // A phone that names the partition once per filesystem it might
-        // hold mounts it with the entry of the one it holds.
+    let mounted = (|| -> Result<Opened> {
         let holds = skyward_block::probe::filesystem(&mapped)?;
         let entry = entries.iter().find(|e| holds.as_ref() == Some(&e.filesystem)).unwrap_or(&entries[0]);
-        let checked = match entry.extras.iter().any(|e| e == "check") {
-            true => Some(skyward_block::fsck::check(&mapped, &entry.filesystem)?),
-            false => None,
-        };
-        std::fs::create_dir_all(MOUNT).with_context(|| format!("make {MOUNT}"))?;
-        mount::mount(&mapped, Path::new(MOUNT), &entry.filesystem, &entry.options)?;
-        Ok((checked, entry.filesystem.clone()))
+        mount_filesystem(entry, &mapped)
     })();
     match mounted {
-        Ok((checked, filesystem)) => Ok(Opened { mapped, filesystem, checked }),
+        Ok(opened) => Ok(opened),
         Err(e) => match dm::remove(MAPPED) {
             Ok(()) => Err(e),
             Err(r) => Err(e.context(format!("removing {MAPPED} afterwards failed too: {r:#}"))),
@@ -197,6 +186,83 @@ pub struct Opening {
     pub mounted: Option<Opened>,
     /// The users whose own files are still closed, the owner first.
     pub closed: Vec<Closed>,
+}
+
+fn mount_filesystem(entry: &Entry, device: &Path) -> Result<Opened> {
+    let checked = match entry.extras.iter().any(|e| e == "check") {
+        true => Some(skyward_block::fsck::check(device, &entry.filesystem)?),
+        false => None,
+    };
+    std::fs::create_dir_all(MOUNT).with_context(|| format!("make {MOUNT}"))?;
+    mount::mount(device, Path::new(MOUNT), &entry.filesystem, &entry.options)?;
+    Ok(Opened { mapped: device.to_path_buf(), filesystem: entry.filesystem.clone(), checked })
+}
+
+fn direct_entry<'a>(entries: &'a [Entry], filesystem: Option<&str>) -> Option<&'a Entry> {
+    let filesystem = filesystem?;
+    if !matches!(filesystem, "f2fs" | "ext4") || entries.iter().any(|e| e.extra("metadata_encryption").is_some()) {
+        return None;
+    }
+    entries.iter().find(|e| e.filesystem == filesystem)
+}
+
+/// Mount a data filesystem with no metadata encryption before asking for
+/// hardware keys. `None` leaves file-encrypted data to the normal key path;
+/// readable superblocks alone never establish that the files are plaintext.
+pub fn open_unencrypted() -> Result<Option<Opening>> {
+    let entries = skyward_block::fstab::read(MOUNT)?;
+    let entry = entries.first().context("the phone's own table says nothing about /data")?;
+    if entries.iter().any(|e| e.extra("metadata_encryption").is_some()) {
+        return Ok(None);
+    }
+    let mounted = if mount::is_mount_point(Path::new(MOUNT))? {
+        None
+    } else {
+        let device = PathBuf::from(skyward_block::fstab::device(entry)?);
+        let holds = skyward_block::probe::filesystem(&device)?;
+        let entry = direct_entry(&entries, holds.as_deref())
+            .context("data has no metadata-encryption declaration and no matching readable f2fs/ext4 filesystem")?;
+        Some(mount_filesystem(entry, &device)?)
+    };
+    if entries.iter().any(|e| e.extra("fileencryption").is_some()) || Path::new(FILE_MODE).try_exists()? || !plaintext_directories()? {
+        return Ok(None);
+    }
+    let shared = Path::new(SHARED_STORAGE).join(OWNER.to_string());
+    let metadata = std::fs::metadata(&shared).with_context(|| format!("read {}", shared.display()))?;
+    anyhow::ensure!(metadata.is_dir(), "{} is not a shared-storage directory", shared.display());
+    if crate::fscrypt::encrypted(&shared)? {
+        return Ok(None);
+    }
+    show_owner_storage()?;
+    Ok(Some(Opening { mounted, closed: Vec::new() }))
+}
+
+fn plaintext_directories() -> Result<bool> {
+    // User policies live below these containers, not necessarily on /data.
+    const CONTAINERS: [&str; 7] = ["media", "user", "user_de", "system_de", "system_ce", "misc_de", "misc_ce"];
+    let root = Path::new(MOUNT);
+    if crate::fscrypt::encrypted(root)? {
+        return Ok(false);
+    }
+    for item in std::fs::read_dir(root).context("list data encryption policies")? {
+        let item = item?;
+        let path = item.path();
+        if !std::fs::metadata(&path).with_context(|| format!("read {}", path.display()))?.is_dir() {
+            continue;
+        }
+        if crate::fscrypt::encrypted(&path)? {
+            return Ok(false);
+        }
+        if CONTAINERS.iter().any(|name| item.file_name() == *name) {
+            for child in std::fs::read_dir(&path).with_context(|| format!("list {}", path.display()))? {
+                let path = child?.path();
+                if std::fs::metadata(&path).with_context(|| format!("read {}", path.display()))?.is_dir() && crate::fscrypt::encrypted(&path)? {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
 }
 
 /// Open the data partition as far as it opens with nothing a user knows:
@@ -589,6 +655,28 @@ mod tests {
             options: vec!["noatime".into(), "inlinecrypt".into()],
             extras: extras.split(',').map(str::to_string).collect(),
         }
+    }
+
+    #[test]
+    fn a_plain_partition_needs_a_matching_readable_filesystem() {
+        let entries = [entry("quota")];
+        assert!(direct_entry(&entries, Some("f2fs")).is_some());
+        assert!(direct_entry(&entries, Some("ext4")).is_none());
+        assert!(direct_entry(&entries, Some("erofs")).is_none());
+        assert!(direct_entry(&entries, None).is_none());
+    }
+
+    #[test]
+    fn metadata_encryption_is_never_treated_as_plaintext() {
+        let entries = [entry("quota"), entry("metadata_encryption=aes-256-xts:wrappedkey_v0")];
+        assert!(direct_entry(&entries, Some("f2fs")).is_none());
+        assert!(direct_entry(&[entry("metadata_encryption=")], Some("f2fs")).is_none());
+    }
+
+    #[test]
+    fn file_encryption_does_not_hide_the_raw_filesystem() {
+        let entries = [entry("fileencryption=aes-256-xts:aes-256-cts:v2")];
+        assert!(direct_entry(&entries, Some("f2fs")).is_some());
     }
 
     #[test]

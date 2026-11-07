@@ -43,7 +43,7 @@ impl Decryptor {
             .name("decrypt".into())
             .spawn(move || {
                 let ended_as = match job {
-                    Job::Open => Ended::Opened(with_key_service(data::open_without_credential)),
+                    Job::Open => Ended::Opened(open()),
                     Job::Unlock { closed, user, credential } => {
                         Ended::Unlocked(with_key_service(|service| data::unlock(service, &closed, user, &credential)))
                     }
@@ -76,6 +76,16 @@ impl Drop for Decryptor {
             thread.join().expect("the decrypting thread does not panic");
         }
     }
+}
+
+/// Open plaintext data without a key service; encrypted files keep their
+/// normal hardware-backed path.
+pub fn open() -> Result<Opening, String> {
+    if let Some(opened) = data::open_unencrypted().map_err(|e| format!("{e:#}"))? {
+        let _ = skyward_sys::kmsg("data opened without a key service: no encryption policies found in Android user directories");
+        return Ok(opened);
+    }
+    with_key_service(data::open_without_credential)
 }
 
 /// Do `work` with the phone's key service, reached afresh for it, and say

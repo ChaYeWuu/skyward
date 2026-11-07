@@ -16,6 +16,10 @@ width = 1440
 height = 3200
 density = 560
 
+# QSEE filesystem listeners require persist at its stock mountpoint.
+[partitions]
+mounted = ["persist"]
+
 [modules]
 sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
 # The touchscreen: Synaptics TouchComm over SPI behind Xiaomi's touch
@@ -76,10 +80,7 @@ sockets = [
 # shared secret, which the phone describes apart from it.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
-# The VNDK bundle holds the dmabuf and hardware libraries the phone's
-# partitions were built against, together with the libc++ they were built
-# against; the system partition's own copies need a libc++ the recovery
-# does not carry, and preloading one breaks the caller's own.
+# Resolve missing vendor dependencies without replacing recovery's runtime.
 libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64", "/mnt/system/system/lib64"]
 ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
 registers = [
@@ -101,10 +102,7 @@ ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
 user = "system"
 groups = ["system"]
 
-# The weaver, in the phone's NXP secure element. Every user's secret is
-# bound to a slot of it, with a screen lock or without. Its account is the
-# one the vendor partition's passwd file gives, as the phone's own init
-# script asks.
+# NXP Weaver serves protectors that name a Weaver slot.
 [[service]]
 path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
 libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64", "/mnt/system/system/lib64"]
@@ -154,10 +152,7 @@ version = "OS3.0.309.0.WNBCNXM"
 package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS3.0.309.0.WNBCNXM/shennong-ota_full-OS3.0.309.0.WNBCNXM-user-16.0-ab2b836306.zip"
 recovery = "2a07b87f0a09ec8e75155aa9d36df354de09d77332cf56caf97659878e91e368"
 
-# qcom-hv-haptics (qcom,hv-haptics in its dtbo), whose driver says the
-# motor's resonant frequency as the 17 Ultra's does; the click is made from
-# samples at that frequency, and the strengths are the 17 Ultra's. Neither
-# is yet tried on this phone's motor.
+# The driver's nonzero preloaded PATTERN2 effect, 53 ms on this phone.
 [haptics]
-resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+click = 0
 strength = { lightest = 0.25, strongest = 0.75 }
