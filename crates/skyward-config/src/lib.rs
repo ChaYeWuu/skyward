@@ -271,6 +271,9 @@ pub struct Device {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Display {
+    /// Panel-specific Qualcomm subpixel rendering profile.
+    #[serde(default)]
+    pub spr: Option<Spr>,
     #[serde(default)]
     pub width: u32,
     #[serde(default)]
@@ -284,6 +287,13 @@ pub struct Display {
     /// sliding over another rounds its leading corners to it.
     #[serde(default)]
     pub corner_radius: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Spr {
+    /// Xiaomi 15 O3 panel, validated with its installed SPR XML.
+    DadaO3,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -386,6 +396,18 @@ pub struct Service {
     /// names it: it keeps these alone, through its change of user.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Unix stream listeners provided through ANDROID_SOCKET_<name>.
+    #[serde(default)]
+    pub sockets: Vec<InitSocket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct InitSocket {
+    pub name: String,
+    pub kind: String,
+    pub mode: u32,
+    pub user: String,
+    pub group: String,
 }
 
 /// The kernel's capabilities, by the names init's capabilities lines give
@@ -483,6 +505,10 @@ impl DeviceConfig {
 
     pub fn parse(text: &str) -> Result<Self> {
         let cfg: DeviceConfig = toml::from_str(text).context("parse device config")?;
+        if cfg.display.spr == Some(Spr::DadaO3) {
+            ensure!(cfg.device.codename == "dada" && (cfg.display.width, cfg.display.height) == (1200, 2670),
+                "[display] dada-o3 SPR requires dada at 1200x2670");
+        }
         for log in &cfg.wipe.logs {
             let path = Path::new(log);
             let plain = path.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
@@ -509,6 +535,7 @@ impl DeviceConfig {
                 s.path
             );
         }
+        let mut socket_names = std::collections::HashSet::new();
         for s in &cfg.services {
             ensure!(s.user.is_none() || !s.groups.is_empty(), "[[service]] {}: a program given a user is given its group too", s.path);
             for name in s.user.iter().chain(&s.groups) {
@@ -516,6 +543,15 @@ impl DeviceConfig {
             }
             for name in &s.capabilities {
                 ensure!(capability(name).is_some(), "[[service]] {}: {name} is not a capability init knows", s.path);
+            }
+            for socket in &s.sockets {
+                ensure!(!socket.name.is_empty() && socket.name.len() < 95 && socket.name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-'), "[[service]] {}: invalid socket name", s.path);
+                ensure!(socket_names.insert(socket.name.clone()), "duplicate service socket {}", socket.name);
+                ensure!(socket.kind == "stream", "[[service]] {}: only stream sockets are supported", s.path);
+                ensure!(socket.mode <= 0o777, "invalid service socket permissions");
+                for name in [&socket.user, &socket.group] {
+                    ensure!(!name.is_empty() && !name.contains(char::is_whitespace), "invalid service socket account");
+                }
             }
         }
         for folder in &cfg.backup.data_skipped {
@@ -616,6 +652,19 @@ mod tests {
         assert!(cfg.modules.load.is_empty());
         assert_eq!((cfg.firmware, cfg.wlan, cfg.update), (None, None, None), "a phone may have none of them");
         assert_eq!(cfg.logd, None, "a recovery's own logd usually has all it needs");
+    }
+
+    #[test]
+    fn service_sockets_validate_names_ownership_and_uniqueness() {
+        let header = "[device]\ncodename = \"x\"\n[[service]]\npath = \"/vendor/bin/daemon\"\n";
+        let socket = "{ name = \"hlos_mink_opener\", kind = \"stream\", mode = 0o660, user = \"system\", group = \"system\" }";
+        let cfg = DeviceConfig::parse(&format!("{header}sockets = [{socket}]\n")).unwrap();
+        assert_eq!(cfg.services[0].sockets[0].mode, 0o660);
+        assert!(DeviceConfig::parse(&format!("{header}sockets = [{socket}, {socket}]\n")).is_err());
+        for name in ["../x", ".", "", "a/b", "a b"] {
+            assert!(DeviceConfig::parse(&format!("{header}sockets = [{}]\n", socket.replace("hlos_mink_opener", name))).is_err());
+        }
+        assert!(DeviceConfig::parse(&format!("{header}sockets = [{}]\n", socket.replace("stream", "dgram"))).is_err());
     }
 
     #[test]

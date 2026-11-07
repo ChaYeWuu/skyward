@@ -49,14 +49,19 @@ jobs:
         run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
       - name: Build the packer
         run: cargo build --locked --release -p skyward-pack
+      - name: Build the OMAPI bridge
+        run: |
+          sdkmanager "build-tools;37.0.0"
+          bash tools/omapi-bridge/build.sh
       - name: Gather them
         run: |
-          mkdir tools
-          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
+          mkdir -p release-tools
+          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack release-tools/
+          cp tools/omapi-bridge/out/omapi-bridge release-tools/omapi-helper
       - uses: actions/upload-artifact@v7
         with:
           name: tools
-          path: tools/
+          path: release-tools/
           if-no-files-found: error
           retention-days: 1
 
@@ -93,7 +98,7 @@ jobs:
           name: tools
           path: tools
       - name: Make the tools runnable
-        run: chmod +x tools/skyward tools/skyward-pack
+        run: chmod +x tools/skyward tools/skyward-pack tools/omapi-helper
       - name: Read the stock build the recovery is made on
         id: stock
         run: tools/skyward-pack stock --config "devices/${{ matrix.device }}.toml" >> "$GITHUB_OUTPUT"
@@ -121,9 +126,11 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
           name="skyward-$version-$DEVICE-$STOCK"
           mkdir out
+          omapi=()
+          if [ "$DEVICE" = dada ]; then omapi=(--omapi tools/omapi-helper); fi
           tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --config "devices/$DEVICE.toml" \
             --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
-            --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
+            --mono-license resources/fonts/KirkMono-OFL.txt "${omapi[@]}" --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
       # The image is the whole partition, flashed as it is, and most of it
       # is the room the recovery leaves empty; it is handed out zipped.

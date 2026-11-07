@@ -487,7 +487,8 @@ fn open_user_files(service: &KeyMint, user: u32, credential: Option<&[u8]>, owne
         (Bound::Weaver(slot), _) => {
             let binder = Binder::open()?;
             let weaver = Weaver::open(&binder)?;
-            let key = crate::user::weaver_key(&stretched, weaver.config()?.key_bytes)?;
+            let config = weaver.config().context("Weaver configuration is unavailable; the secure-element transport must work before the credential can be checked")?;
+            let key = crate::user::weaver_key(&stretched, config.key_bytes)?;
             let value = weaver.read(*slot, &key)?;
             (crate::user::weaver_protector_secret(&stretched, &value), None)
         }

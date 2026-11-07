@@ -551,6 +551,13 @@ fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
     for run in owners {
         let (uid, gid) = (id(&run.user)?, id(&run.group)?);
         for path in &run.paths {
+            // Module insertion returns before ueventd necessarily creates
+            // its device nodes. Wait for that asynchronous creation before
+            // assigning ownership and starting services that use the node.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !Path::new(path).exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
             std::os::unix::fs::chown(path, Some(uid), Some(gid)).with_context(|| format!("give {path} to {}:{}", run.user, run.group))?;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(run.mode))
                 .with_context(|| format!("give {path} the mode {:o}", run.mode))?;

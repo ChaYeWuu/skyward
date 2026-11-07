@@ -355,6 +355,10 @@ pub mod kms {
 
     impl KmsSurface {
         pub fn open(path: &str) -> Result<Self> {
+            Self::open_with_spr(path, None)
+        }
+
+        pub fn open_with_spr(path: &str, spr: Option<&[u8; 304]>) -> Result<Self> {
             let card = open_card(path)?;
             let res = card.resource_handles().context("read KMS resources")?;
 
@@ -499,6 +503,13 @@ pub mod kms {
             }
             req.add_property(crtc, crtc_props.handle("MODE_ID")?, first);
             req.add_property(crtc, crtc_props.handle("ACTIVE")?, property::Value::Boolean(true));
+            // SPR must be present on the first frame: this panel expects
+            // packed subpixels in its native 422 DSC stream.
+            if let Some(data) = spr {
+                let id = crtc_props.handle("SDE_SPR_INIT_CFG_V2")?;
+                let value = card.create_property_blob(data).context("create SPR v2 blob")?;
+                req.add_property(crtc, id, value);
+            }
             for &other in attached.iter().filter(|&&p| !candidates.iter().any(|c| c.0 == p)) {
                 let props = Props::read(&card, other)?;
                 req.add_property(other, props.handle("FB_ID")?, property::Value::Framebuffer(None));
@@ -536,13 +547,14 @@ pub mod kms {
 
             let ids: Vec<u32> = planes.iter().map(|p| u32::from(p.0)).collect();
             let summary = format!(
-                "{:?} connector {} mode {:?} {w}x{h} {} Hz, crtc {}, planes {ids:?} {:?}",
+                "{:?} connector {} mode {:?} {w}x{h} {} Hz, crtc {}, planes {ids:?} {:?}, SPR {}",
                 conn.interface(),
                 u32::from(conn.handle()),
                 mode.name(),
                 mode.vrefresh(),
                 u32::from(crtc),
-                fourcc
+                fourcc,
+                spr.is_some()
             );
             Ok(KmsSurface { card, bufs, back: 1, flipping: false, planes, w, h, order, summary })
         }

@@ -16,6 +16,8 @@ pub mod pages;
 pub mod search;
 pub mod settings;
 pub mod sprite;
+#[cfg(any(target_os = "android", test))]
+pub mod spr;
 pub mod surface;
 pub mod term;
 pub mod theme;

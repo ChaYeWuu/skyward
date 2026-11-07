@@ -1022,7 +1022,15 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     }
     let mut info = skyward_info::collect(cfg)?;
     let fonts = Fonts::load(font, 0, mono)?;
-    let mut surface = KmsSurface::open("/dev/dri/card0")?;
+    let spr = match cfg.display.spr {
+        Some(skyward_config::Spr::DadaO3) => {
+            ensure!(cfg.device.codename == "dada" && (cfg.display.width, cfg.display.height) == (1200, 2670),
+                "dada-o3 SPR requires the Xiaomi 15 O3 panel configuration");
+            Some(skyward_ui::spr::dada_o3())
+        }
+        None => None,
+    };
+    let mut surface = KmsSurface::open_with_spr("/dev/dri/card0", spr.as_ref())?;
     let (w, h) = surface.size();
     eprintln!("display {}", surface.describe());
     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;

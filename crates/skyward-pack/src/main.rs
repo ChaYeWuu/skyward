@@ -50,6 +50,10 @@ enum Cmd {
         /// phone or a full update package holds it, ending in its AVB footer.
         #[arg(long)]
         stock: PathBuf,
+        /// Rebuild a saved Skyward image for the same device, replacing its
+        /// existing program, configuration and assets.
+        #[arg(long)]
+        update_skyward: bool,
         /// Skyward built for the device (aarch64-linux-android).
         #[arg(long)]
         binary: PathBuf,
@@ -65,6 +69,9 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
+        /// Required when the device config starts the Thales OMAPI bridge.
+        #[arg(long)]
+        omapi: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -103,7 +110,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, config, font, mono, mono_license, out } => {
+        Cmd::Recovery { stock, update_skyward, binary, config, font, mono, mono_license, omapi, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
@@ -113,7 +120,22 @@ fn main() -> Result<()> {
                 anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
             }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
-            skyward_config::DeviceConfig::load(&config)?;
+            let device = skyward_config::DeviceConfig::load(&config)?;
+            match rd.find(paths::CONFIG) {
+                Some(previous) => {
+                    ensure!(update_skyward, "this image already contains Skyward; use --update-skyward to rebuild it explicitly");
+                    let old = skyward_config::DeviceConfig::parse(std::str::from_utf8(&previous.data)?)?;
+                    ensure!(old.device.codename == device.device.codename, "the saved Skyward image is for {}, but the config is for {}", old.device.codename, device.device.codename);
+                }
+                None => ensure!(!update_skyward, "--update-skyward requires an existing Skyward image"),
+            }
+            if device.services.iter().any(|s| s.path == "/skyward/omapi-bridge") {
+                let bridge = omapi.context("this device requires --omapi pointing to the built Thales OMAPI bridge")?;
+                put(&mut rd, "skyward/omapi-bridge", 0o755, read(&bridge)?, update_skyward)?;
+                put(&mut rd, "skyward/omapi.xml", 0o644, OMAPI_MANIFEST.to_vec(), update_skyward)?;
+            } else {
+                ensure!(omapi.is_none(), "this device configuration does not use the OMAPI bridge");
+            }
             rd.replace(paths::RECOVERY, read(&binary)?)?;
             // Install scripts look for the commands a stock recovery lacks
             // among its programs, and its unzip there too, a link to ziptool
@@ -122,16 +144,16 @@ fn main() -> Result<()> {
             for command in paths::COMMANDS {
                 rd.link(command, recovery)?;
             }
-            rd.add(paths::CONFIG, 0o644, read(&config)?)?;
-            rd.add(paths::FONT, 0o644, read(&font)?)?;
-            rd.add(paths::MONO, 0o644, read(&mono)?)?;
-            rd.add(paths::MONO_LICENSE, 0o644, read(&mono_license)?)?;
+            put(&mut rd, paths::CONFIG, 0o644, read(&config)?, update_skyward)?;
+            put(&mut rd, paths::FONT, 0o644, read(&font)?, update_skyward)?;
+            put(&mut rd, paths::MONO, 0o644, read(&mono)?, update_skyward)?;
+            put(&mut rd, paths::MONO_LICENSE, 0o644, read(&mono_license)?, update_skyward)?;
             // A stock ramdisk may run logd without any scheduling profiles,
             // and logd stops as soon as it cannot find the one it asks for.
             if rd.find(paths::TASK_PROFILES).is_none() {
                 rd.add(paths::TASK_PROFILES, 0o644, TASK_PROFILES.to_vec())?;
             }
-            rd.add(paths::MTP_RC, 0o644, MTP_RC.to_vec())?;
+            put(&mut rd, paths::MTP_RC, 0o644, MTP_RC.to_vec(), update_skyward)?;
             // On an unlocked device adbd keeps root when ro.secure is 0 and
             // lets any computer in without authorization when ro.adb.secure is
             // 0; init lets a later line of a property file override an earlier
@@ -226,6 +248,15 @@ const TASK_PROFILES: &[u8] = include_bytes!("task_profiles.json");
 /// The init rules that give the USB port file transfer beside adb, which a
 /// stock recovery does not offer.
 const MTP_RC: &[u8] = include_bytes!("mtp.rc");
+const OMAPI_MANIFEST: &[u8] = include_bytes!("../../../tools/omapi-bridge/manifest-omapi.xml");
+
+fn put(rd: &mut Ramdisk, name: &str, mode: u32, bytes: Vec<u8>, update: bool) -> Result<()> {
+    if update && rd.find(name).is_some() {
+        rd.replace(name, bytes)
+    } else {
+        rd.add(name, mode, bytes)
+    }
+}
 
 /// A property file without the lines that set any of `names`.
 fn without(props: &[u8], names: &[&str]) -> Vec<u8> {
