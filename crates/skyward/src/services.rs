@@ -244,6 +244,9 @@ fn command(s: &Service, who: &Credentials, sockets: &[Listening]) -> Command {
     if !s.libraries.is_empty() {
         cmd.env("LD_LIBRARY_PATH", s.libraries.join(":"));
     }
+    if !s.preload.is_empty() {
+        cmd.env("LD_PRELOAD", s.preload.join(":"));
+    }
     let who = who.clone();
     let inherited: Vec<_> = sockets.iter().map(|socket| {
         let fd = socket.fd.as_raw_fd();

@@ -76,7 +76,8 @@ sockets = [
 # shared secret, which the phone describes apart from it.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
+preload = ["/mnt/system/system/lib64/libc++.so"]
 ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
 registers = [
     "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
@@ -92,7 +93,8 @@ groups = ["system", "drmrpc"]
 # phone's vendor.gatekeeper.is_security_level_spu is 0.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.gatekeeper-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
+preload = ["/mnt/system/system/lib64/libc++.so"]
 ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
 user = "system"
 groups = ["system"]
@@ -103,7 +105,8 @@ groups = ["system"]
 # script asks.
 [[service]]
 path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
-libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
+preload = ["/mnt/system/system/lib64/libc++.so"]
 ready_service = "android.hardware.weaver.IWeaver/default"
 user = "vendor_nxp_weaver"
 groups = ["system", "drmrpc"]

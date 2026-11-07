@@ -348,6 +348,9 @@ pub struct Service {
     /// Directories for LD_LIBRARY_PATH, searched in order.
     #[serde(default)]
     pub libraries: Vec<String>,
+    /// Shared objects LD_PRELOAD loads before anything else.
+    #[serde(default)]
+    pub preload: Vec<String>,
     /// The program runs once, to its end, as a service of init's marked
     /// oneshot does: it is not started again, the programs after it start
     /// once it has ended, and it has to end well.
@@ -548,6 +551,9 @@ impl DeviceConfig {
             }
             for name in &s.capabilities {
                 ensure!(capability(name).is_some(), "[[service]] {}: {name} is not a capability init knows", s.path);
+            }
+            for file in &s.preload {
+                ensure!(Self::device_absolute(file), "[[service]] {}: {file} is not an absolute path to preload", s.path);
             }
             for socket in &s.sockets {
                 ensure!(!socket.name.is_empty() && socket.name.len() < 95 && socket.name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-'), "[[service]] {}: invalid socket name", s.path);
