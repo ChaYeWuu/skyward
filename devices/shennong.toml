@@ -80,7 +80,7 @@ path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
 # partitions were built against, together with the libc++ they were built
 # against; the system partition's own copies need a libc++ the recovery
 # does not carry, and preloading one breaks the caller's own.
-libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64", "/mnt/system/system/lib64"]
 ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
 registers = [
     "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
@@ -96,7 +96,7 @@ groups = ["system", "drmrpc"]
 # phone's vendor.gatekeeper.is_security_level_spu is 0.
 [[service]]
 path = "/vendor/bin/hw/android.hardware.gatekeeper-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64", "/mnt/system/system/lib64"]
 ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
 user = "system"
 groups = ["system"]
@@ -107,7 +107,7 @@ groups = ["system"]
 # script asks.
 [[service]]
 path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
-libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64"]
+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64/bootstrap", "/apex/com.android.vndk.v34/lib64", "/mnt/system/system/lib64"]
 ready_service = "android.hardware.weaver.IWeaver/default"
 user = "vendor_nxp_weaver"
 groups = ["system", "drmrpc"]
