@@ -24,6 +24,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  SKYWARD_BUILDER: ${{ github.repository_owner }}
 
 jobs:
   check:

@@ -13,6 +13,9 @@ use std::str::FromStr;
 /// Version of this build, shown on the About page.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Builder attribution supplied when compiling this recovery.
+pub const BUILDER: Option<&str> = option_env!("SKYWARD_BUILDER");
+
 const CPU: &str = "/sys/devices/system/cpu";
 const POWER_SUPPLY: &str = "/sys/class/power_supply";
 const SYS_BLOCK: &str = "/sys/class/block";

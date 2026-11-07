@@ -3,11 +3,15 @@ param(
     [string]$Ndk = '',
     [ValidateRange(21, 37)][int]$AndroidApi = 30,
     [string]$Package = 'skyward',
+    [string]$Builder = 'TUSB-5834',
     [switch]$HostBuild,
     [switch]$Online,
     [switch]$Test
 )
 $ErrorActionPreference = 'Stop'
+$Builder = $Builder.Trim()
+if ($Builder.Contains("`r") -or $Builder.Contains("`n")) { throw 'Builder must fit on one line' }
+$env:SKYWARD_BUILDER = $Builder
 $workspace = Split-Path $PSScriptRoot -Parent
 if (!$Ndk) { $Ndk = Join-Path $ToolsHome 'android-ndk-r29' }
 $rust = Join-Path $ToolsHome 'rustup\toolchains\stable-x86_64-pc-windows-gnu'

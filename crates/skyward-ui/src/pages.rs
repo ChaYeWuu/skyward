@@ -18,7 +18,7 @@ use crate::theme::Theme;
 use crate::tr;
 use crate::icons::{self, Icon};
 use crate::widgets::{self, Caption, Detail, Fact, Outline, Row, Spec, Tone, Trail};
-use skyward_info::{DeviceInfo, VERSION};
+use skyward_info::{DeviceInfo, BUILDER, VERSION};
 use skyward_install::{Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::Progress;
 use skyward_net::supplicant::Security;
@@ -560,10 +560,14 @@ pub fn specs(cx: &Ctx) -> Frame {
     if let Some(r) = &i.android {
         y = widgets::info_card(&mut c, t, f, y + gap, &[(l.pick(ANDROID_VERSION), fmt::android(l, r, i.security_patch.as_ref()))]);
     }
-    y = widgets::info_card(&mut c, t, f, y + gap, &[
+    let mut recovery = vec![
         (l.pick(["Recovery 版本", "Recovery 版本", "Recovery version"]), format!("Skyward {VERSION}")),
         (l.pick(["内核版本", "核心版本", "Kernel version"]), i.kernel.clone()),
-    ]);
+    ];
+    if let Some(builder) = BUILDER.filter(|name| !name.is_empty()) {
+        recovery.push((l.pick(["构建者", "建置者", "Built by"]), builder.to_string()));
+    }
+    y = widgets::info_card(&mut c, t, f, y + gap, &recovery);
 
     let mut boot = Vec::new();
     if let Some(s) = i.slot {
