@@ -5,7 +5,7 @@ use skyward_sys::ueventd;
 use skyward_vab::Mounted;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, BufReader};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -225,7 +225,18 @@ fn supervise(s: &Service, who: &Credentials, accounts: &HashMap<String, u32>) ->
 
 /// Start the program and wait for it to end.
 fn run(s: &Service, who: &Credentials, sockets: &[Listening]) -> Result<String> {
-    let mut child = command(s, who, sockets).spawn().with_context(|| format!("start {}", s.path))?;
+    let mut cmd = command(s, who, sockets);
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().with_context(|| format!("start {}", s.path))?;
+    // 服务的 stderr 逐行搬进内核日志：不吞掉任何一行，起不来时才有得查。
+    if let Some(stderr) = child.stderr.take() {
+        let path = s.path.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let _ = skyward_sys::kmsg(&format!("{path}: {line}"));
+            }
+        });
+    }
     let status = child.wait().context("wait for it")?;
     Ok(format!("pid {} ended: {status}", child.id()))
 }
@@ -240,7 +251,7 @@ fn command(s: &Service, who: &Credentials, sockets: &[Listening]) -> Command {
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("ANDROID_SOCKET_") { cmd.env_remove(key); }
     }
-    cmd.args(&s.args).current_dir("/").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(&s.args).current_dir("/").stdin(Stdio::null()).stdout(Stdio::null());
     if !s.libraries.is_empty() {
         cmd.env("LD_LIBRARY_PATH", s.libraries.join(":"));
     }

@@ -565,7 +565,9 @@ pub fn specs(cx: &Ctx) -> Frame {
         (l.pick(["内核版本", "核心版本", "Kernel version"]), i.kernel.clone()),
     ];
     if let Some(builder) = BUILDER.filter(|name| !name.is_empty()) {
-        recovery.push((l.pick(["构建者", "建置者", "Built by"]), builder.to_string()));
+        // 分隔符拆行：卡片 value 本就按行渲染。
+        let lines = builder.replace(" | ", "\n").replace(" · ", "\n");
+        recovery.push((l.pick(["构建者", "建置者", "Built by"]), lines));
     }
     y = widgets::info_card(&mut c, t, f, y + gap, &recovery);
 
