@@ -503,6 +503,11 @@ impl DeviceConfig {
         Self::parse(&text)
     }
 
+    // 打包可在 Windows 宿主进行，std 的 is_absolute 对无盘符的 /foo 误判；config 路径皆为设备端 Unix 路径
+    fn device_absolute(p: &str) -> bool {
+        p.starts_with('/')
+    }
+
     pub fn parse(text: &str) -> Result<Self> {
         let cfg: DeviceConfig = toml::from_str(text).context("parse device config")?;
         if cfg.display.spr == Some(Spr::DadaO3) {
@@ -513,7 +518,7 @@ impl DeviceConfig {
             let path = Path::new(log);
             let plain = path.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
             ensure!(
-                path.is_absolute() && plain && path.starts_with(DATA) && path != Path::new(DATA),
+                Self::device_absolute(log) && plain && path.starts_with(DATA) && path != Path::new(DATA),
                 "[wipe] logs: {log} is not a folder inside {DATA}"
             );
         }
@@ -565,7 +570,7 @@ impl DeviceConfig {
                 "[haptics] names either a waveform the driver keeps or the file it says the motor's resonant frequency in"
             );
             if let Some(file) = &haptics.resonance {
-                ensure!(Path::new(file).is_absolute(), "[haptics] resonance: {file} is not an absolute path");
+                ensure!(Self::device_absolute(file), "[haptics] resonance: {file} is not an absolute path");
             }
             let Strength { lightest, strongest } = haptics.strength;
             ensure!(
@@ -577,7 +582,7 @@ impl DeviceConfig {
             for library in &logd.libraries {
                 let path = Path::new(library);
                 let plain = path.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
-                ensure!(path.is_absolute() && plain && path.file_name().is_some(), "[logd] libraries: {library} is not an absolute path to a file");
+                ensure!(Self::device_absolute(library) && plain && path.file_name().is_some(), "[logd] libraries: {library} is not an absolute path to a file");
             }
         }
         for owners in &cfg.owners {
@@ -589,7 +594,7 @@ impl DeviceConfig {
             for file in &owners.paths {
                 let path = Path::new(file);
                 let plain = path.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
-                ensure!(path.is_absolute() && plain && path.file_name().is_some(), "[[owners]] paths: {file} is not an absolute path to a file");
+                ensure!(Self::device_absolute(file) && plain && path.file_name().is_some(), "[[owners]] paths: {file} is not an absolute path to a file");
             }
         }
         if let Some(stock) = &cfg.stock {
@@ -622,7 +627,7 @@ impl DeviceConfig {
                         );
                         ensure!(plain && !file.path.is_empty(), "[wlan] firmware: {} is not a path from the top of {partition}", file.path);
                     }
-                    None => ensure!(path.is_absolute(), "[wlan] firmware: {} is not an absolute path", file.path),
+                    None => ensure!(Self::device_absolute(&file.path), "[wlan] firmware: {} is not an absolute path", file.path),
                 }
             }
         }
