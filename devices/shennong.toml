@@ -46,21 +46,91 @@ oneshot = true
 user = "root"
 groups = ["root", "system", "wakelock", "graphics"]
 
+# The secure world reaches back into Android through the listeners this
+# daemon registers; without them the key service cannot use any key. The
+# init script asks a notify-topology socket of it, which init makes and
+# hands over as a file descriptor.
+[[service]]
+path = "/vendor/bin/qseecomd"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_property = "vendor.sys.listeners.registered"
+user = "root"
+groups = ["root", "drmrpc"]
+sockets = [{ name = "notify-topology", kind = "stream", mode = 0o660, user = "system", group = "drmrpc" }]
+
+# ssgtzd registers TA autoload/opener services with the secure world. As
+# on the 15, leaving it out keeps the credential services from working.
+[[service]]
+path = "/vendor/bin/ssgtzd"
+libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64"]
+user = "system"
+groups = ["system", "oem_2912", "wakelock"]
+capabilities = ["WAKE_ALARM", "BLOCK_SUSPEND"]
+sockets = [
+    { name = "ssgtzd", kind = "stream", mode = 0o660, user = "system", group = "oem_2912" },
+    { name = "ssgtzd_opener", kind = "stream", mode = 0o660, user = "system", group = "system" },
+]
+
+# The key service, which is the only thing that can use the keys the phone
+# wrapped in hardware. The same program serves the secure clock and the
+# shared secret, which the phone describes apart from it.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
+registers = [
+    "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
+    "android.hardware.security.secureclock.ISecureClock/default",
+    "android.hardware.security.sharedsecret.ISharedSecret/default",
+]
+user = "system"
+groups = ["system", "drmrpc"]
+
+# The credential service: it is what the secure world has check a screen
+# lock, and the only thing that can hand out the note the key service wants
+# before it will use a key a screen lock guards. The AIDL kind, as the
+# phone's vendor.gatekeeper.is_security_level_spu is 0.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
+user = "system"
+groups = ["system"]
+
+# The weaver, in the phone's NXP secure element. Every user's secret is
+# bound to a slot of it, with a screen lock or without. Its account is the
+# one the vendor partition's passwd file gives, as the phone's own init
+# script asks.
+[[service]]
+path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64"]
+ready_service = "android.hardware.weaver.IWeaver/default"
+user = "vendor_nxp_weaver"
+groups = ["system", "drmrpc"]
+
+# The boot control, which says which slot the bootloader starts next and
+# switches it, writing where the bootloader reads it. It comes last: the
+# phone is usable without it.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot-service.qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.boot.IBootControl/default"
+user = "root"
+groups = ["root"]
+
 # WLAN: the kiwi node in the device tree, driven by qca_cld3_kiwi_v2, the
 # one WLAN driver the phone's own modules.blocklist leaves of those its
 # modules.load lists. Its cfg80211 asks for rfkill, one of the kernel's own
-# modules in system_dlkm, as the 17 Ultra's does. Its recovery covers the
-# vendor partition's firmware folder with the modem's, as the 13 Ultra's
-# does, so the settings and the MAC address are given to the loader again:
-# the settings from the vendor partition, the address from where the
-# vendor's link points in persist. wpa_supplicant runs on the recovery's
-# own libraries before the vendor partition's, as on the 17 Ultra.
+# modules in system_dlkm, as the 17 Ultra's does. The firmware loader finds
+# the driver's images in /vendor/firmware_mnt/image/kiwi, which the
+# kernel's own firmware_class.path names and the recovery mounts, so no
+# file of them is given here. This phone's persist keeps no wlan_mac.bin;
+# as on the 15, the driver obtains its address without it.
 [wlan]
 modules = ["rfkill", "qca_cld3_kiwi_v2"]
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
 firmware = [
     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
